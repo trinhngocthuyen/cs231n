@@ -8,6 +8,13 @@ def softmax(Z):
     return EZ / np.sum(EZ, axis=1).reshape((-1, 1))
 
 
+def softmax_gradient(ins=None, outs=None):
+    assert(ins is not None or outs is not None)
+    if outs is None:
+        outs = softmax(ins)
+    return outs * (1 - outs)
+
+
 def softmax_loss_naive(W, X, y, reg):
     """
     Softmax loss function, naive implementation (with loops)
