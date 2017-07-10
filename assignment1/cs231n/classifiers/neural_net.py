@@ -147,7 +147,7 @@ class TwoLayerNet(object):
 
         return loss, grads
 
-    def train(self, X, y, X_val, y_val,
+    def train(self, X, y, X_val=None, y_val=None,
               learning_rate=1e-3, learning_rate_decay=0.95,
               reg=5e-6, num_iters=100,
               batch_size=200, verbose=False):
@@ -199,11 +199,12 @@ class TwoLayerNet(object):
 
             # Every epoch, check train and val accuracy and decay learning rate.
             if it % iterations_per_epoch == 0:
-                # Check accuracy
-                train_acc = (self.predict(X_batch) == y_batch).mean()
-                val_acc = (self.predict(X_val) == y_val).mean()
-                train_acc_history.append(train_acc)
-                val_acc_history.append(val_acc)
+                if X_val is not None:
+                    # Check accuracy
+                    train_acc = (self.predict(X_batch) == y_batch).mean()
+                    val_acc = (self.predict(X_val) == y_val).mean()
+                    train_acc_history.append(train_acc)
+                    val_acc_history.append(val_acc)
 
                 # Decay learning rate
                 learning_rate *= learning_rate_decay
