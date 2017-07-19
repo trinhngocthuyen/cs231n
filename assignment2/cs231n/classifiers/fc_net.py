@@ -6,18 +6,22 @@ from cs231n.layers import *
 from cs231n.layer_utils import *
 
 
-def array_to_dict(arr, prefix):
-    dict = {}
-    for i in range(len(arr)):
-        dict['{}{}'.format(prefix, i)] = arr[i]
-    return dict
+def makeup_key(prefix, l):
+    return '{}{}'.format(prefix, l)
 
 
-def extract_array(dict, prefix, n_items):
-    arr = []
-    for i in range(n_items):
-        arr.append(dict['{}{}'.format(prefix, i)])
-    return arr
+# def array_to_dict(arr, prefix):
+#     dict = {}
+#     for i in range(len(arr)):
+#         dict['{}{}'.format(prefix, i)] = arr[i]
+#     return dict
+#
+#
+# def extract_array(dict, prefix, n_items):
+#     arr = []
+#     for i in range(n_items):
+#         arr.append(dict['{}{}'.format(prefix, i)])
+#     return arr
 
 
 class TwoLayerNet(object):
@@ -161,21 +165,9 @@ class FullyConnectedNet(object):
 
         ############################################################################
         dims = [input_dim] + hidden_dims + [num_classes]
-        weights, biases = [], []
         for l in range(self.num_layers):
-            w = np.random.normal(0, weight_scale, (dims[l], dims[l + 1]))
-            b = np.zeros(dims[l + 1])
-            weights.append(w)
-            biases.append(b)
-
-        self.params.update(array_to_dict(weights, prefix='W'))
-        self.params.update(array_to_dict(biases, prefix='b'))
-
-        # tnthuyen: Another approach to store params is to put all weights into an array:
-        #   self.params['weights'] = weights # where weights = [W1, W2, ...]
-        # However, since we cast the params to dtype, we could not store it as an primitive array like this.
-        # Also, we could also ravel all the weights and later shape them based on hidden_dims. I dont prefer this way.
-        # P/s: I dont think casting parameters like in the end of this function is a good idea :)
+            self.params[makeup_key('W', l)] = np.random.normal(0, weight_scale, (dims[l], dims[l + 1]))
+            self.params[makeup_key('b', l)] = np.zeros(dims[l + 1])
         ############################################################################
 
         # When using dropout we need to pass a dropout_param dictionary to each
@@ -195,24 +187,84 @@ class FullyConnectedNet(object):
         self.bn_params = []
         if self.use_batchnorm:
             self.bn_params = [{'mode': 'train'} for i in range(self.num_layers - 1)]
-            gammas = [np.random.randn(dims[l + 1]) for l in range(self.num_layers - 1)]
-            betas = [np.random.randn(dims[l + 1]) for l in range(self.num_layers - 1)]
-
-            self.params.update(array_to_dict(gammas, prefix='gamma'))
-            self.params.update(array_to_dict(betas, prefix='beta'))
+            for l in range(self.num_layers - 1):
+                self.params[makeup_key('gamma', l)] = np.random.randn(dims[l + 1])
+                self.params[makeup_key('beta', l)] = np.random.randn(dims[l + 1])
 
         # Cast all parameters to the correct datatype
         for k, v in self.params.items():
             self.params[k] = v.astype(dtype)
 
 
-    def extract_bn_param(self, l):
-        if not self.use_batchnorm:
-            return None, None, None
-        gamma = self.params['gamma{}'.format(l)]
-        beta = self.params['beta{}'.format(l)]
-        bn_param = self.bn_params[l]
-        return gamma, beta, bn_param
+    def extract_one_step_param(self, l):
+        w = self.params[makeup_key('W', l)]
+        b = self.params[makeup_key('b', l)]
+        gamma, beta, bn_param = None, None, None
+        dropout_param = None
+
+        if l == self.num_layers - 1:    # Last layer: FC only
+            return w, b, gamma, beta, bn_param, dropout_param
+
+        if self.use_batchnorm:
+            gamma = self.params[makeup_key('gamma', l)]
+            beta = self.params[makeup_key('beta', l)]
+            bn_param = self.bn_params[l]
+        if self.use_dropout:
+            dropout_param = self.dropout_param
+
+        return w, b, gamma, beta, bn_param, dropout_param
+
+
+    def forward_one_step(self, x, l):
+        # w, b, gamma, beta, bn_param, dropout_param = self.extract_one_step_param(l)
+        # gamma, beta, bn_param = batchnorm
+        w, b, gamma, beta, bn_param, dropout_param = self.extract_one_step_param(l)
+
+        caches = []
+        if l == self.num_layers - 1:
+            # Last layer: FC
+            out, cache = affine_forward(x, w, b)
+            caches = [cache]
+        else:
+            # { FC - [BN] - ReLU - [Dropdout] } x (L-1)
+            out, cache1 = affine_forward(x, w, b)
+            caches.append(cache1)
+            if self.use_batchnorm:
+                out, cache2 = batchnorm_forward(out, gamma, beta, bn_param)
+                caches.append(cache2)
+
+            out, cache3 = relu_forward(out)
+            caches.append(cache3)
+
+            if self.use_dropout:
+                out, cache4 = dropout_forward(out, dropout_param)
+                caches.append(cache4)
+
+        return out, caches
+
+
+    def backward_one_step(self, dout, l, caches):
+        dx, dgamma, dbeta = dout, None, None
+        if l == self.num_layers - 1:
+            # Last layer: FC
+            dx, dw, db = affine_backward(dx, caches[0])
+        else:
+            # { FC - [BN] - ReLU - [Dropdout] } x (L-1)
+            count = 1
+            if self.use_dropout:
+                dx = dropout_backward(dx, caches[-count])
+                count += 1
+
+            dx = relu_backward(dx, caches[-count])
+            count += 1
+
+            if self.use_batchnorm:
+                dx, dgamma, dbeta = batchnorm_backward(dx, caches[-count])
+                count += 1
+
+            dx, dw, db = affine_backward(dx, caches[-count])
+            count += 1
+        return dx, dw, db, dgamma, dbeta
 
 
     def loss(self, X, y=None):
@@ -233,24 +285,13 @@ class FullyConnectedNet(object):
                 bn_param['mode'] = mode
 
         ############################################################################
-        weights = extract_array(self.params, prefix='W', n_items=self.num_layers)
-        biases = extract_array(self.params, prefix='b', n_items=self.num_layers)
-
         # { FC - [BN] - ReLU - [Dropdout] } x (L-1)
-        outs = [X]
+        out = X
         caches = []
-        for l in range(self.num_layers - 1):
-            gamma, beta, bn_param = self.extract_bn_param(l)
-            out, cache = affine_bn_relu_forward(outs[-1], weights[l], biases[l], gamma=gamma, beta=beta, bn_param=bn_param)
-            outs.append(out)
-            caches.append(cache)
-
-        outs = outs[1:]  # Remove the first one: X
-
-        # Last layer: FC
-        scores, cache = affine_forward(outs[-1], weights[-1], biases[-1])
-        outs.append(scores)
-        caches.append(cache)
+        for l in range(self.num_layers):
+            out, caches_l = self.forward_one_step(out, l)
+            caches.append(caches_l)
+        scores = out
         ############################################################################
 
         # If test mode return early
@@ -258,30 +299,22 @@ class FullyConnectedNet(object):
             return scores
 
         loss, dscores = softmax_loss(scores, y)
+
+        weights = [self.params[makeup_key('W', l)] for l in range(self.num_layers)]
         loss += 0.5 * self.reg * np.sum([np.sum(w ** 2) for w in weights])
 
         grads = {}
-        grads_weights, grads_biases = [], []
-        grads_gammas, grads_betas = [], []
         ############################################################################
-        # Last layer: FC
-        dout, dW, db = affine_backward(dscores, caches[-1])
-        grads_weights.append(dW + self.reg * weights[-1])
-        grads_biases.append(db)
+        dx = dscores
+        for l in range(self.num_layers)[::-1]:
+            dx, dw, db, dgamma, dbeta = self.backward_one_step(dx, l, caches[l])
+            grads[makeup_key('W', l)] = dw
+            grads[makeup_key('b', l)] = db
 
-        for l in range(self.num_layers-1)[::-1]:
-            dout, dW, db, dgamma, dbeta= affine_bn_relu_backward(dout, caches[l], use_batchnorm=self.use_batchnorm)
-            grads_weights.append(dW + self.reg * weights[l])
-            grads_biases.append(db)
             if self.use_batchnorm:
-                grads_gammas.append(dgamma)
-                grads_betas.append(dbeta)
-        ############################################################################
-        grads.update(array_to_dict(grads_weights[::-1], prefix='W'))
-        grads.update(array_to_dict(grads_biases[::-1], prefix='b'))
+                grads[makeup_key('gamma', l)] = dgamma
+                grads[makeup_key('beta', l)] = dbeta
 
-        if self.use_batchnorm:
-            grads.update(array_to_dict(grads_gammas[::-1], prefix='gamma'))
-            grads.update(array_to_dict(grads_betas[::-1], prefix='beta'))
+        ############################################################################
 
         return loss, grads
