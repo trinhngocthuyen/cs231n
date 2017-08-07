@@ -37,6 +37,16 @@ class CaptioningRNN(object):
             raise ValueError('Invalid cell_type "%s"' % cell_type)
 
         self.cell_type = cell_type
+
+        if cell_type == 'rnn':
+            self._run_forward = rnn_forward
+            self._run_backward = rnn_backward
+        elif cell_type == 'lstm':
+            self._run_forward = lstm_forward
+            self._run_backward = lstm_backward
+        else:
+            raise ValueError('Invalid cell_type "%s"' % cell_type)
+
         self.dtype = dtype
         self.word_to_idx = word_to_idx
         self.idx_to_word = {i: w for w, i in word_to_idx.items()}
@@ -121,20 +131,14 @@ class CaptioningRNN(object):
         h0, cache_h0 = project_features_forward(features, W_proj, b_proj)
         x, cache_x = word_embedding_forward(captions_in, W_embed)
 
-        if self.cell_type == 'rnn':
-            hs, cache_hs = rnn_forward(x, h0, Wx, Wh, b)
-        else:
-            # TODO
-            hs, cache_hs = None, None
-            pass
-
+        hs, cache_hs = self._run_forward(x, h0, Wx, Wh, b)
         scores, cache_scores = temporal_affine_forward(hs, W_vocab, b_vocab)
         loss, dscores = temporal_softmax_loss(scores, captions_out, mask)
 
         # Backward pass
         # -----------------------------------
         dhs, dW_vocab, db_vocab = temporal_affine_backward(dscores, cache_scores)
-        dx, dh0, dWx, dWh, db = rnn_backward(dhs, cache_hs)
+        dx, dh0, dWx, dWh, db = self._run_backward(dhs, cache_hs)
         dW_embed = word_embedding_backward(dx, cache_x)
         _, dW_proj, db_proj = project_features_backward(dh0, cache_h0)
 
@@ -187,7 +191,7 @@ class CaptioningRNN(object):
         h, _ = project_features_forward(features, W_proj, b_proj)
         for t in range(max_length):
             x, _ = word_embedding_forward(idxs, W_embed)
-            h, _ = rnn_step_forward(x.reshape((N, 1, -1)), h.reshape((N, 1, -1)), Wx, Wh, b)
+            h, _ = self._run_forward(x.reshape((N, 1, -1)), h.reshape((N, -1)), Wx, Wh, b)
             scores, _ = temporal_affine_forward(h.reshape(N, 1, -1), W_vocab, b_vocab)
             idxs = np.argmax(scores.reshape(N, -1), axis=1)
             captions[:, t] = idxs

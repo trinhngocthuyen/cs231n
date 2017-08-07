@@ -177,6 +177,7 @@ class CaptioningSolver(object):
         - acc: Scalar giving the fraction of instances that were correctly
           classified by the model.
         """
+
         return 0.0
 
         # Maybe subsample the data
@@ -188,7 +189,7 @@ class CaptioningSolver(object):
             y = y[mask]
 
         # Compute predictions in batches
-        num_batches = N / batch_size
+        num_batches = N // batch_size
         if N % batch_size != 0:
             num_batches += 1
         y_pred = []
