@@ -8,3 +8,5 @@ datasets/coco_captioning/
 /datasets/squeezenet.ckpt.index
 /datasets/squeezenet.ckpt.meta
 /datasets/squeezenet.ckpt
+
+/datasets/MNIST_data/
